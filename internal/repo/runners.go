@@ -353,6 +353,9 @@ func (r *RunnersRepo) SetRunnerRuntimeAuthMode(runnerID, provider, authMode stri
 	if authMode != domain.RuntimeAuthLocal && authMode != domain.RuntimeAuthPersonal {
 		return fmt.Errorf("invalid runtime auth mode %q", authMode)
 	}
+	if strings.EqualFold(provider, domain.DUCCProvider) && authMode != domain.RuntimeAuthLocal {
+		return fmt.Errorf("DUCC 仅支持团队 Runner 的 OneAPI 身份")
+	}
 	if strings.EqualFold(provider, "codebuddy") && authMode != domain.RuntimeAuthPersonal {
 		return fmt.Errorf("CodeBuddy 仅支持个人凭证")
 	}

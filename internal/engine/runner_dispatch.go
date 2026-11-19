@@ -261,6 +261,9 @@ func (e *Engine) dispatchRunnerTask(ctx context.Context, runnerID string, run do
 	if err != nil {
 		return "", err
 	}
+	if ex.Kind == domain.DUCCProvider && sandboxSpec.Profile.Driver != "local" {
+		return "", errors.New("DUCC + OneAPI 需使用团队 Runner 上的 Local 执行环境")
+	}
 	task.Sandbox = sandboxSpec
 	if err := validateSOPHandoffRunnerPayload(run, task); err != nil {
 		return "", err

@@ -110,6 +110,12 @@ SSH handles clone, fetch and push. A conversation delivery returns the branch an
 
 The first account created in the browser becomes the platform administrator. After that, anyone who can reach the login page may sign up as a regular user while `AGENTFLOW_ALLOW_SIGNUP` is `true` (the default). Registered users can create requirements and run SOPs on your workers, so set `AGENTFLOW_ALLOW_SIGNUP=false` for any installation reachable from untrusted networks and create accounts explicitly instead.
 
+To require company-email verification for self-service sign-ups, set `AGENTFLOW_ALLOW_SIGNUP=true` and `AGENTFLOW_SIGNUP_EMAIL_DOMAINS` to the comma-separated list of allowed domains. Sign-up accepts a company email address, password, and a six-digit code sent to that address. The code expires after ten minutes. Use the same company email address to sign in. Initial administrator setup and administrator-created accounts use the existing flow.
+
+Serve the sign-in page over HTTPS. Configure `AGENTFLOW_SIGNUP_SMTP_ADDR` as a host and port for a relay that supports STARTTLS, and set `AGENTFLOW_SIGNUP_SMTP_FROM` to its approved sender address. Set `AGENTFLOW_SIGNUP_SMTP_USER` and `AGENTFLOW_SIGNUP_SMTP_PASSWORD` together if the relay requires authentication. Inject the SMTP password through server secrets. Use the same stable `AGENTFLOW_SESSION_SECRET` across API replicas.
+
+For an HTTPS mail relay that accepts the multipart `message/send` contract, set `AGENTFLOW_SIGNUP_MAIL_RELAY_URL` to the full HTTPS endpoint and inject the authorized sending token through `AGENTFLOW_SIGNUP_MAIL_RELAY_TOKEN`. The request supplies the sending token in `mailFrom`. The relay must return a successful business `code` (0 or 200) or a true `success` flag when the code is absent. The relay settings take precedence over SMTP. For an isolated container, `AGENTFLOW_SIGNUP_MAIL_RELAY_SOCKET` can point to a private Unix socket that forwards raw TCP to that relay. Keep the original HTTPS URL so the API still verifies the relay certificate.
+
 Platform administrators create accounts under **Platform administration → Member accounts** (平台管理 → 成员账号): enter a login name and an initial password, optionally grant administration, and hand the password to the teammate. The same page lists every account and resets the password of a password account; accounts that sign in through GitHub or a gateway cannot be given a password there. New accounts join the welcome project, like self sign-ups.
 
 LoopForge assumes a trusted team. Every signed-in account can list all projects, requirements and runs. Project settings and repositories can be changed only by the project owner or a platform administrator, and personal credentials only by their owner. Do not use one installation to separate untrusted tenants.
@@ -134,6 +140,19 @@ Personal runners are connected from the execution-machine page with a short-live
 A platform administrator can share one CodeBuddy API Key under **Platform administration → Shared CodeBuddy Key** (平台共享 CodeBuddy Key): pick the network environment that issued it and the models members may use (the first is the default). Members without a key of their own then chat and run SOPs on it, limited to those models; a role configured with another model runs on the default and the run says so. Members with their own key keep using it with any model. Scheduled tasks, clarification, reports, bots and run evaluation still need the runner's own key. A scheduled task uses the key for its selected CLI and does not borrow the shared CodeBuddy key. The key is stored in the database like personal keys and is never shown again after saving. `AGENTFLOW_ASSISTANT_SPONSOR_LOGIN`, which lent one account's key limited to `deepseek-v4.1-flash`, still applies while no shared key is configured.
 
 Configure provider credentials in the platform UI, not the host's global CLI configuration. Credentials are bound to the responsible actor by the upstream runtime. The home composer and SOP roles each choose a built-in CLI independently. Select the executor beside the home model selector; its API key (and optional Codex/Claude base URL) comes from your personal settings. Changing the executor preserves the draft; saved conversations record the executor used. Main Bot writes still pass through the platform tool gateway and its approval checks. Requirement clarification and notifications continue to use CodeBuddy. A scheduled assistant task can select any supported CLI and runs as an ordinary chat turn; Codex and Claude Code still need that account's own credential. Live model tests are opt-in; set `AGENTFLOW_LIVE_TESTS=1` only for the acceptance suites that need to load local credentials.
+
+### DUCC with team OneAPI
+
+Deploy the Runner as an unprivileged account in a dedicated team container or VM. Limit access to trusted team users and repositories. A Local SOP node runs with that account's filesystem permissions. Use a separate workspace and service identity and keep personal home directories, unrelated credentials and the Docker socket out of the Runner container.
+
+Set these values in the Runner service environment:
+
+| Setting | Value |
+| --- | --- |
+| `AGENTFLOW_DUCC_BIN` | Absolute path to the pinned DUCC executable or compatible launcher. It must support `--version`, print mode with `stream-json`, and DUCC settings from a file. |
+| `AGENTFLOW_DUCC_SETTINGS` | Absolute path to a Runner-readable private file with no group or other permissions (for example `0400`). Set `env.ANTHROPIC_BASE_URL` to the approved HTTPS OneAPI endpoint and set exactly one of `env.ANTHROPIC_AUTH_TOKEN` and `env.ANTHROPIC_API_KEY` to the team service credential. Set `env.ANTHROPIC_MODEL` for the Runner's default model when needed. |
+
+After binding the Runner, select it as the responsible user's execution machine, configure a **Local** execution environment for the SOP and select **DUCC + OneAPI** in the Agent role. Enter the gateway's model ID if the role needs to override the default. The Runner uses a node-scoped CLI home and passes service settings from a private file outside the repository. Verify the pinned DUCC distribution can make a model request with the Runner settings and an empty home before enabling the Runner for team jobs. This executor applies to SOP Agent nodes.
 
 ## Observability schema
 

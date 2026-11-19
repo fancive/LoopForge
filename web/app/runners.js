@@ -56,8 +56,8 @@ function runnerStatusLabel(status,lastSeen){
   const style=status==='online'?' online':status==='offline'?' offline':'';
   return `<span class="runner-status${style}" title="${escapeHTML(runnerLastSeen(lastSeen))}"><i></i>${escapeHTML(label)}</span>`;
 }
-const runnerCLILabels={'claude-code':'Claude Code','codex':'Codex','codebuddy':'CodeBuddy',opencode:'OpenCode',cursor:'Cursor CLI',agy:'Antigravity',kimi:'Kimi Code',pi:'Pi',dsh:'DeepSeek Harness',zcode:'ZCode'};
-const runnerCLIIcons={'claude-code':'claude',codex:'codex',codebuddy:'codebuddy',opencode:'opencode',cursor:'cursor',agy:'gemini',kimi:'kimi',pi:'pi',dsh:'deepseek',zcode:'glm'};
+const runnerCLILabels={'claude-code':'Claude Code',ducc:'DUCC + OneAPI','codex':'Codex','codebuddy':'CodeBuddy',opencode:'OpenCode',cursor:'Cursor CLI',agy:'Antigravity',kimi:'Kimi Code',pi:'Pi',dsh:'DeepSeek Harness',zcode:'ZCode'};
+const runnerCLIIcons={'claude-code':'claude',ducc:'claude',codex:'codex',codebuddy:'codebuddy',opencode:'opencode',cursor:'cursor',agy:'gemini',kimi:'kimi',pi:'pi',dsh:'deepseek',zcode:'glm'};
 const runnerAuthLabel={local:'账号登录',personal:'API Key'};
 const runnerAuthDescription={local:'Claude Code 和 Codex 可以使用运行 Runner 的系统账号在这台机器上的已有登录。共享对话中，只有机器所有者发言时会使用此登录。',personal:'读取「个人配置」中保存的 API Key。对话使用当前发言人的 Key，SOP 使用运行责任人的 Key。'};
 const runnerOSLabels={darwin:'macOS',linux:'Linux',windows:'Windows'};
@@ -80,6 +80,7 @@ function runnerRuntimeAuthMode(runtime){
   return runnerRuntimeSupportsLogin(runtime)&&runtime.authMode!=='personal'?'local':'personal';
 }
 function runnerAuthHTML(runtime,key,busy,shared){
+  if(runtime.provider==='ducc')return '<span class="runner-auth-fixed">团队 OneAPI</span>';
   const supportsLogin=runnerRuntimeSupportsLogin(runtime);
   const mode=runnerAuthChanges.get(key)||runnerRuntimeAuthMode(runtime);
   const missing=mode==='personal'&&!runnerPersonalCredentialConfigured(runtime.provider);
@@ -104,7 +105,7 @@ function runnerRuntimeHTML(runner,runtime,shared){
       <span class="runner-runtime-name"><b>${label}</b><small title="${escapeHTML(runtime.binaryPath||'')}">${escapeHTML(runtime.version||runtime.binaryPath||'已发现')}</small></span>
     </label>
     ${runnerAuthHTML(runtime,key,busy,shared)}
-    ${shared?'':`<button class="runner-more" type="button" data-runner-runtime-menu="${safeKey}" aria-label="${label} 更多操作" aria-haspopup="menu" aria-expanded="false" aria-busy="${testing||updating}">${huiIcon(testing||updating?'arc-spinner':'more-horizontal')}</button>`}
+    ${shared||provider==='ducc'?'':`<button class="runner-more" type="button" data-runner-runtime-menu="${safeKey}" aria-label="${label} 更多操作" aria-haspopup="menu" aria-expanded="false" aria-busy="${testing||updating}">${huiIcon(testing||updating?'arc-spinner':'more-horizontal')}</button>`}
   </div>`;
 }
 function runnerLastSeen(value){

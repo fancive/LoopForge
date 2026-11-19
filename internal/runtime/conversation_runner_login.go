@@ -256,3 +256,14 @@ func sameRunnerLogin(original, refreshed []byte) bool {
 	}
 	return account(before) == account(after)
 }
+
+// PrepareRunnerDUCCHome opens a node-scoped HOME without staging any host login.
+func PrepareRunnerDUCCHome(workspace, name string) (string, error) {
+	home := WorkspaceAgentCLIHome(workspace, name)
+	root, err := openAgentCLIHome(home)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	return home.Path(), nil
+}

@@ -281,6 +281,9 @@ func (r Runner) SupportsProvider(provider string) bool {
 // they always use the responsible user's personal credential. Codex and
 // Claude Code default to local login.
 func (r Runner) RuntimeAuthMode(provider string) string {
+	if provider == DUCCProvider {
+		return RuntimeAuthLocal
+	}
 	if IsAgentCLIKind(provider) {
 		return RuntimeAuthPersonal
 	}
@@ -663,3 +666,6 @@ func SafeWorkspaceRelPath(p string) bool {
 	clean := path.Clean(p)
 	return clean == p && clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
 }
+
+// DUCCProvider runs the native CLI with the team Runner's OneAPI settings.
+const DUCCProvider = "ducc"

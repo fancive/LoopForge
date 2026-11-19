@@ -99,10 +99,16 @@ function sopRunRequirements(w){
     const role=(state.data?.agents||[]).find(a=>a.id===node.agentId);
     const id=role?.executorId||node.executorId||'codebuddy';
     const kind=(state.data?.executors||[]).find(e=>e.id===id)?.kind||id;
-    if(['codebuddy','codex','claude','claude-code','opencode','cursor','agy','kimi','pi','dsh','zcode'].includes(kind))providers.add(kind==='claude'?'claude-code':kind);
+    if(['codebuddy','codex','claude','claude-code','ducc','opencode','cursor','agy','kimi','pi','dsh','zcode'].includes(kind))providers.add(kind==='claude'?'claude-code':kind);
   }
   const agentLabels={opencode:'OpenCode',cursor:'Cursor CLI',agy:'Antigravity',kimi:'Kimi Code',pi:'Pi',dsh:'DeepSeek Harness',zcode:'ZCode'};
   for(const kind of providers){
+    if(kind==='ducc'){
+      const runner=(state.runners||[]).find(r=>r.id===state.defaultRunnerId);
+      const available=runner?.status==='online'&&(runner.runtimes||[]).some(rt=>rt.provider==='ducc'&&rt.status!=='disabled');
+      rows.push({key:'run-ducc',label:'DUCC + OneAPI 团队 Runner',ok:available&&(!driver||driver==='local'),hint:'在执行机器中选择已配置团队 OneAPI 的 Runner，并使用 Local 执行环境。'});
+      continue;
+    }
     const known={codebuddy:['CodeBuddy','codeBuddyApiKey','codeBuddyApiKeyConfigured'],codex:['Codex','codexApiKey','codexApiKeyConfigured'],'claude-code':['Claude Code','claudeCodeApiKey','claudeCodeApiKeyConfigured']}[kind];
     const [label,field,flag]=known||[agentLabels[kind]||kind,'agentCli.'+kind,'agentCliConfigured'];
     if(!known){

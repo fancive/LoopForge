@@ -49,6 +49,8 @@ func main() {
 		LongPollTimeout:        *longPoll,
 		DisableAutoUpdate:      !*autoUpdate,
 		ManagedCLIRoot:         strings.TrimSpace(os.Getenv("AGENTFLOW_MANAGED_CLI_ROOT")),
+		DUCCBinary:             strings.TrimSpace(os.Getenv("AGENTFLOW_DUCC_BIN")),
+		DUCCSettings:           strings.TrimSpace(os.Getenv("AGENTFLOW_DUCC_SETTINGS")),
 		DisableRunSandboxReuse: !*reuseSandbox,
 	}
 	cfg.MaxConcurrency = concurrencyFromEnv(cfg.MaxConcurrency)

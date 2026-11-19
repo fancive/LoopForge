@@ -79,6 +79,9 @@ type Config struct {
 	DisableRunSandboxReuse bool
 	// ExtraBinaries maps a provider kind to a non-default binary name.
 	ExtraBinaries map[string]string
+	// DUCC is opt-in and uses private OneAPI settings on this Runner.
+	DUCCBinary   string
+	DUCCSettings string
 	// ManagedCLIRoot explicitly opts platform runners into managed CLI coordination.
 	// Empty leaves ordinary user runners unchanged; it is never inferred from PATH.
 	ManagedCLIRoot string
@@ -349,6 +352,9 @@ func (d *Daemon) refreshRuntimes(ctx context.Context) {
 			log.Printf("managed CLI discovery: %v", err)
 			return
 		}
+	}
+	if ducc, ok := d.detectDUCC(ctx); ok {
+		runtimes = append(runtimes, ducc)
 	}
 	d.mu.Lock()
 	d.runtimes = runtimes
@@ -807,6 +813,17 @@ func (d *Daemon) mcpTarget(requireCredentials bool, gitTokens ...string) runtime
 // continue its verification pipeline.
 func (d *Daemon) executeInvocation(ctx context.Context, task domain.RunnerTask) (execResult, map[string]string) {
 	inv := task.Invocation
+	var duccBinary string
+	if inv.Executor.Kind == domain.DUCCProvider {
+		var err error
+		duccBinary, err = d.duccBinary()
+		if err != nil {
+			return execResult{status: domain.RunnerTaskFailed, errMsg: err.Error()}, nil
+		}
+		if task.Sandbox == nil || runnerTaskSandboxDriver(task) != "local" {
+			return execResult{status: domain.RunnerTaskFailed, errMsg: "DUCC + OneAPI 需使用团队 Runner 上的 Local 执行环境"}, nil
+		}
+	}
 	workspace := d.taskWorkspace(task)
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		return execResult{status: domain.RunnerTaskFailed, errMsg: fmt.Sprintf("workspace %s: %v", workspace, err)}, nil
@@ -843,6 +860,9 @@ func (d *Daemon) executeInvocation(ctx context.Context, task domain.RunnerTask) 
 		return execResult{status: domain.RunnerTaskFailed, errMsg: fmt.Sprintf("provision MCP: %v", err)}, nil
 	}
 	executor := d.invocationExecutor(task)
+	if duccBinary != "" {
+		executor.Binary = duccBinary
+	}
 	var browserMCP *domain.MCPServerDefinition
 	if runtime.BrowserWantedForExecutor(executor.Kind) {
 		browserMCP = runtime.EnsureSandboxBrowser(ctx, sandbox, workspace, inv.RunID, nil)
@@ -907,6 +927,18 @@ func (d *Daemon) executeInvocation(ctx context.Context, task domain.RunnerTask) 
 		}
 	}
 	commandEnv := runtime.CommandEnvironment(prepared.Command)
+	if duccBinary != "" {
+		var duccEnv map[string]string
+		var cleanup func()
+		argv, duccEnv, cleanup, err = d.bindDUCC(task, workspace, argv)
+		if err != nil {
+			return execResult{status: domain.RunnerTaskFailed, errMsg: err.Error()}, nil
+		}
+		defer cleanup()
+		for key, value := range duccEnv {
+			commandEnv[key] = value
+		}
+	}
 	for key, value := range d.taskManagedEnvironment(task) {
 		commandEnv[key] = value
 	}

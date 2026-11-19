@@ -744,6 +744,9 @@ func (e *Engine) executeNode(ctx context.Context, runID string, wf domain.Workfl
 				}
 				return result, dispatchErr
 			}
+			if ex.Kind == domain.DUCCProvider {
+				return "", errors.New("请为此 SOP 选择已配置 DUCC + OneAPI 的团队 Runner")
+			}
 			repositories := current.RepositoryContexts()
 			boundAssets, skipped, bindErr := runtime.PrepareMCPServers(assets, runtime.MCPTarget{
 				GitToken: gitTok, RequireCredentials: true,

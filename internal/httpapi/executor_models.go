@@ -106,6 +106,7 @@ func executorModelCatalogs() map[string]executorModelCatalog {
 			},
 			Efforts: effortOptions(domain.ExecutorEffortLevels["claude-code"]),
 		},
+		domain.DUCCProvider: {CustomModel: true},
 		// Official-endpoint catalogs. OpenCode and Pi have none, so their
 		// models come from the Base URL.
 		"opencode": {CustomModel: true, Efforts: effortOptions(domain.ExecutorEffortLevels["opencode"])},
