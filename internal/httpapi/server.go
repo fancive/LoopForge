@@ -240,6 +240,7 @@ func newWithNotifications(s *repo.Store, e *engine.Engine, syncSvc *tracker.Serv
 	g.POST("/api/auth/password", api.auth.authPassword)
 	g.GET("/api/auth/setup", api.auth.authSetup)
 	g.POST("/api/auth/register", api.auth.authRegister)
+	g.POST("/api/auth/email-code", api.auth.authEmailCode)
 	g.GET("/api/auth/local", api.auth.authLocal)
 	g.POST("/api/auth/local", api.auth.authLocal)
 	g.GET("/api/auth/gongfeng", api.auth.gongfengOAuthStatus)

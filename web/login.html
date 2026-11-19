@@ -20,7 +20,11 @@
     <p id="loginSubtitle">登录你的交付工作台</p>
     <p id="setupNotice" class="login-setup" hidden>这是首次启动。创建的第一个账号将成为平台管理员。</p>
     <form id="loginForm">
-      <label>用户名<input name="login" autocomplete="username" required maxlength="64" autofocus></label>
+      <label id="loginNameField"><span id="loginNameLabel">用户名或邮箱</span><input name="login" autocomplete="username" required maxlength="254" autofocus></label>
+      <label id="signupEmailField" hidden><span id="signupEmailLabel">公司邮箱</span><input name="email" type="email" autocomplete="username" maxlength="254"></label>
+      <button id="signupSendCode" class="button" type="button" hidden>发送验证码</button>
+      <label id="signupCodeField" hidden><span id="signupCodeLabel">邮箱验证码</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6"></label>
+      <p id="signupCodeStatus" role="status" hidden></p>
       <label>密码<input name="password" type="password" autocomplete="current-password" required minlength="6" maxlength="72"></label>
       <label id="confirmField" hidden>确认密码<input name="confirm" type="password" autocomplete="new-password" maxlength="72"></label>
       <p id="passwordRule" class="login-rule" hidden>密码至少 6 个字符</p>

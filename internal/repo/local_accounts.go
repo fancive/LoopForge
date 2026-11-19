@@ -12,8 +12,9 @@ import (
 // Local accounts are an optional identity adapter. User IDs, permissions and
 // API tokens continue to use the upstream UsersRepo and TokensRepo.
 type localAccountRow struct {
-	UserID       int64  `gorm:"primaryKey;autoIncrement:false"`
-	PasswordHash string `gorm:"size:128;not null"`
+	UserID        int64   `gorm:"primaryKey;autoIncrement:false"`
+	PasswordHash  string  `gorm:"size:128;not null"`
+	VerifiedEmail *string `gorm:"size:254;uniqueIndex"`
 }
 
 func (localAccountRow) TableName() string { return "local_accounts" }

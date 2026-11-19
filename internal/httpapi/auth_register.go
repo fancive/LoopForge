@@ -12,13 +12,15 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
 var (
-	registerMu   sync.Mutex
-	loginPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$`)
+	registerMu       sync.Mutex
+	emailCodePattern = regexp.MustCompile(`^[0-9]{6}$`)
+	loginPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$`)
 )
 
 // signupEnabled reports whether visitors may create accounts after the first
@@ -33,7 +35,11 @@ func signupEnabled() bool {
 
 func (h *authHandlers) authSetup(c *gin.Context) {
 	needsSetup := h.repo != nil && h.repo.LocalAccountCount() == 0
-	c.JSON(http.StatusOK, gin.H{"needsSetup": needsSetup, "signupEnabled": needsSetup || signupEnabled()})
+	state := gin.H{"needsSetup": needsSetup, "signupEnabled": needsSetup || signupEnabled()}
+	if emailSignupEnabled() {
+		state["emailSignup"] = !needsSetup && signupEnabled() && emailSignupEnabled()
+	}
+	c.JSON(http.StatusOK, state)
 }
 
 const welcomeProjectID = "welcome"
@@ -58,9 +64,13 @@ func joinWelcomeProject(store *repo.Store, userID int64) {
 	}
 }
 
-func (h *authHandlers) authRegister(c *gin.Context) {
+func sameAuthOrigin(c *gin.Context) bool {
 	origin, err := url.Parse(c.GetHeader("Origin"))
-	if err != nil || origin.Host != c.Request.Host || (origin.Scheme != "http" && origin.Scheme != "https") {
+	return err == nil && origin.Host == c.Request.Host && (origin.Scheme == "http" || origin.Scheme == "https")
+}
+
+func (h *authHandlers) authRegister(c *gin.Context) {
+	if !sameAuthOrigin(c) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "invalid request origin"})
 		return
 	}
@@ -68,40 +78,67 @@ func (h *authHandlers) authRegister(c *gin.Context) {
 	var input struct {
 		Login    string `json:"login"`
 		Password string `json:"password"`
+		Email    string `json:"email"`
+		Code     string `json:"code"`
 	}
 	if c.ShouldBindJSON(&input) != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid registration request"})
 		return
 	}
 	input.Login = strings.TrimSpace(input.Login)
-	if !loginPattern.MatchString(input.Login) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "用户名需 2–64 位，以字母或数字开头，只能包含字母、数字、_ . -"})
-		return
-	}
 	if len(input.Password) < repo.MinPasswordLength || len(input.Password) > repo.MaxPasswordLength {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("密码需 %d–%d 个字符", repo.MinPasswordLength, repo.MaxPasswordLength)})
 		return
 	}
-	// Only a valid request reaches the accounts, so only it spends the shared
-	// password budget (see passwordLimiter).
+	registerMu.Lock()
+	first := h.repo.LocalAccountCount() == 0
+	verifyEmail := !first && emailSignupEnabled()
+	var email string
+	if verifyEmail {
+		email = allowedSignupEmail(input.Email)
+		if email == "" || !emailCodePattern.MatchString(input.Code) {
+			registerMu.Unlock()
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请输入允许注册的公司邮箱和六位验证码"})
+			return
+		}
+	} else if !loginPattern.MatchString(input.Login) {
+		registerMu.Unlock()
+		c.JSON(http.StatusBadRequest, gin.H{"error": "用户名需 2–64 位，以字母或数字开头，只能包含字母、数字、_ . -"})
+		return
+	}
+	// Only a valid request reaches account creation and spends the shared
+	// budget (see passwordLimiter).
 	if !h.allowPasswordAttempt(c.RemoteIP()) {
+		registerMu.Unlock()
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many attempts. Try again in a minute."})
 		return
 	}
-	registerMu.Lock()
-	first := h.repo.LocalAccountCount() == 0
 	if !first && !signupEnabled() {
 		registerMu.Unlock()
 		c.JSON(http.StatusForbidden, gin.H{"error": "自助注册已关闭，请联系管理员创建账号"})
 		return
 	}
-	u, err := h.repo.CreateLocalAccount(input.Login, input.Password, first)
+	var u domain.User
+	var err error
+	if verifyEmail {
+		u, err = h.repo.CreateVerifiedLocalAccount(email, input.Password, h.emailCodeDigest(email, input.Code), time.Now().UTC())
+	} else {
+		u, err = h.repo.CreateLocalAccount(input.Login, input.Password, first)
+	}
 	if err == nil && !first {
 		h.joinWelcomeProject(u.ID)
 	}
 	registerMu.Unlock()
+	if errors.Is(err, repo.ErrEmailCodeInvalid) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码无效、已使用或已过期"})
+		return
+	}
 	if errors.Is(err, repo.ErrLoginTaken) {
-		c.JSON(http.StatusConflict, gin.H{"error": "该用户名已被使用"})
+		message := "该用户名已被使用"
+		if verifyEmail {
+			message = "该邮箱已注册，请登录"
+		}
+		c.JSON(http.StatusConflict, gin.H{"error": message})
 		return
 	}
 	if err != nil {

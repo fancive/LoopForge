@@ -271,3 +271,52 @@ func TestMySQLGitSSHCredentialLifecycle(t *testing.T) {
 		t.Fatal("deleting SSH keys changed the token or left the configured flag set")
 	}
 }
+
+func TestMySQLVerifiedEmailRegistration(t *testing.T) {
+	dsn := os.Getenv("AGENTFLOW_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("AGENTFLOW_TEST_MYSQL_DSN is not set")
+	}
+	s, err := Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now().UTC().Truncate(time.Second)
+	login := fmt.Sprintf("verified-email-%d", now.UnixNano())
+	email := login + "@company.example"
+	defer func() { _ = s.CancelEmailRegistration(email, "fixture-digest") }()
+	expires := now.Add(10 * time.Minute)
+	if issued, err := s.IssueEmailRegistration(email, "fixture-digest", expires, time.Minute); !issued || err != nil {
+		t.Fatalf("issue code: issued=%t err=%v", issued, err)
+	}
+	if issued, err := s.IssueEmailRegistration(email, "duplicate", expires.Add(time.Second), time.Minute); issued || err != nil {
+		t.Fatalf("duplicate send: issued=%t err=%v", issued, err)
+	}
+	if _, err := s.CreateVerifiedLocalAccount(email, "expired-password", "fixture-digest", expires.Add(time.Second)); !errors.Is(err, ErrEmailCodeInvalid) {
+		t.Fatalf("expired code: %v", err)
+	}
+	for range 4 {
+		if _, err := s.CreateVerifiedLocalAccount(email, "new-password", "wrong-code", now); !errors.Is(err, ErrEmailCodeInvalid) {
+			t.Fatalf("wrong code: %v", err)
+		}
+	}
+	user, err := s.CreateVerifiedLocalAccount(email, "new-password", "fixture-digest", now)
+	if err != nil {
+		t.Fatalf("valid fifth attempt: %v", err)
+	}
+	defer func() {
+		_ = s.DB.Exec("DELETE FROM local_accounts WHERE user_id = ?", user.ID).Error
+		_ = s.DB.Exec("DELETE FROM users WHERE id = ?", user.ID).Error
+	}()
+	if _, err := s.CreateVerifiedLocalAccount(email, "new-password", "fixture-digest", now); !errors.Is(err, ErrEmailCodeInvalid) {
+		t.Fatalf("replay: %v", err)
+	}
+	if err := s.SetLocalPassword(user.ID, "changed-password"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := s.UserByVerifiedEmail(email)
+	if !ok || got.ID != user.ID || !s.CheckLocalPassword(user.ID, "changed-password") {
+		t.Fatal("verified email association did not survive password reset")
+	}
+}

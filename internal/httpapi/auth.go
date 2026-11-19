@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -34,6 +35,7 @@ func authSessionExpired(user *auth.User) bool {
 
 type authHandlers struct {
 	*deps
+	sendSignupEmail func(context.Context, string, string) error
 }
 
 func trustGatewayIdentityHeaders() bool {

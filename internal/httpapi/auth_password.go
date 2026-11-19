@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"net/http"
-	"net/url"
+	"strings"
 	"sync"
+
+	"agentflow/internal/domain"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -80,8 +82,7 @@ func (d *deps) allowPasswordAttempt(ip string) bool {
 
 func (h *authHandlers) authPassword(c *gin.Context) {
 	// Require a same-origin browser request; proxy headers cannot grant identity.
-	origin, err := url.Parse(c.GetHeader("Origin"))
-	if err != nil || origin.Host != c.Request.Host || (origin.Scheme != "http" && origin.Scheme != "https") {
+	if !sameAuthOrigin(c) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "invalid request origin"})
 		return
 	}
@@ -94,11 +95,20 @@ func (h *authHandlers) authPassword(c *gin.Context) {
 		Login    string `json:"login"`
 		Password string `json:"password"`
 	}
-	if c.ShouldBindJSON(&input) != nil || len(input.Login) > 64 || len(input.Password) > 72 {
+	if c.ShouldBindJSON(&input) != nil || len(input.Login) > 254 || (len(input.Login) > 64 && !strings.Contains(input.Login, "@")) || len(input.Password) > 72 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid login request"})
 		return
 	}
-	u, found := h.repo.UserByLoginName(input.Login)
+	var u domain.User
+	var found bool
+	if strings.Contains(input.Login, "@") {
+		if email := canonicalEmail(input.Login); email != "" {
+			u, found = h.repo.UserByVerifiedEmail(email)
+		}
+	}
+	if !found && len(input.Login) <= 64 {
+		u, found = h.repo.UserByLoginName(input.Login)
+	}
 	valid := h.repo.CheckLocalPassword(u.ID, input.Password)
 	if !found || !valid {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
