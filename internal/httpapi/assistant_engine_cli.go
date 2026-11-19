@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 
+	"agentflow/internal/domain"
 	"agentflow/internal/managedcli"
 	"agentflow/internal/runtime"
 )
@@ -37,7 +38,7 @@ type assistantCLIInvocation struct {
 
 type assistantEngineInvocationOpts struct {
 	Bin, Root, Config, Prompt, Model, Effort, SessionID, SystemPrompt string
-	Resume, Workspace                                                 bool
+	Resume, Workspace, TeamDUCC                                       bool
 	// ReviewOnly is a one-shot call without MCP servers or session history,
 	// such as a title summary.
 	ReviewOnly bool
@@ -132,6 +133,9 @@ func (e assistantCredentialError) Is(target error) bool {
 }
 
 func assistantRunnerLoginError(engine string) error {
+	if engine == domain.DUCCProvider {
+		return errors.New("团队 OneAPI 拒绝了本次 DUCC 请求，请检查执行机器的服务配置")
+	}
 	return fmt.Errorf("执行机器上的 %s 本机登录态无效或已过期，请检查 Runner 账户的 CLI 登录", assistantEngineLabel(engine))
 }
 
@@ -195,9 +199,13 @@ func prepareAssistantClaudeInvocation(o assistantEngineInvocationOpts) (assistan
 		return assistantCLIInvocation{}, err
 	}
 	sessionID := assistantClaudeSessionID(o.SessionID)
+	settingSources := "user"
+	if o.TeamDUCC {
+		settingSources = ""
+	}
 	argv := []string{o.Bin, "-p", "--verbose", "--output-format", "stream-json", "--include-partial-messages",
 		"--max-turns", nativeAssistantUnlimitedTurns, "--system-prompt", o.SystemPrompt,
-		"--mcp-config", mcpPath, "--strict-mcp-config", "--settings", settingsPath, "--setting-sources", "user",
+		"--mcp-config", mcpPath, "--strict-mcp-config", "--settings", settingsPath, "--setting-sources", settingSources,
 		"--permission-mode", "bypassPermissions"}
 	if o.Model != "" {
 		argv = append(argv, "--model", o.Model)
@@ -208,8 +216,11 @@ func prepareAssistantClaudeInvocation(o assistantEngineInvocationOpts) (assistan
 	if effort := strings.TrimSpace(o.Effort); effort != "" {
 		argv = append(argv, "--effort", effort)
 	}
+	if o.ReviewOnly || o.TeamDUCC {
+		argv = append(argv, "--tools", "")
+	}
 	if o.ReviewOnly {
-		argv = append(argv, "--tools", "", "--no-session-persistence")
+		argv = append(argv, "--no-session-persistence")
 	}
 	if o.Resume {
 		argv = append(argv, "--resume", sessionID)
@@ -219,6 +230,10 @@ func prepareAssistantClaudeInvocation(o assistantEngineInvocationOpts) (assistan
 	// --disallowedTools is variadic: end option parsing before the prompt.
 	argv = append(argv, "--", o.Prompt)
 	command := runtime.CommandSpec{Argv: argv, Provider: "claude-code", CredentialBindings: []runtime.CredentialBinding{runtime.BindClaudeCode}}
+	if o.TeamDUCC {
+		command.Provider = domain.DUCCProvider
+		command.CredentialBindings = nil
+	}
 	command = runtime.PromptOnStdin(command, o.Prompt)
 	return assistantCLIInvocation{
 		command:     command.WithClaudeBypassAccepted(),

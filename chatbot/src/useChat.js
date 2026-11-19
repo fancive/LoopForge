@@ -32,6 +32,7 @@ export const EXECUTORS = [
   { id: "codebuddy", icon: "sparkles", label: "CodeBuddy", detail: "使用 CodeBuddy 模型与个人 API Key。" },
   { id: "codex", icon: "terminal", label: "Codex", detail: "使用 Codex CLI 与个人 Codex API Key。" },
   { id: "claude-code", icon: "brain", label: "Claude Code", detail: "使用 Claude Code CLI 与个人 Claude Code API Key。" },
+  { id: "ducc", icon: "brain", label: "DUCC + OneAPI", detail: "使用所选执行机器上的团队 OneAPI 配置。" },
   { id: "opencode", icon: "terminal", label: "OpenCode", detail: "使用 OpenCode 与个人 API Key。" },
   { id: "cursor", icon: "terminal", label: "Cursor", detail: "使用 Cursor CLI 与个人 API Key。" },
   { id: "agy", icon: "sparkles", label: "Antigravity", detail: "使用 Antigravity 与个人 API Key。" },
@@ -41,6 +42,8 @@ export const EXECUTORS = [
   { id: "zcode", icon: "terminal", label: "ZCode", detail: "使用 ZCode 与个人 API Key。" },
 ];
 const EXECUTOR_KEY = "loopforge.assistant.executor";
+const duccChatModels = [{ id: "ducc:default", engine: "ducc", name: "团队默认模型", family: "claude" }];
+const duccMachineMessage = "请选择已启用 DUCC + OneAPI 且在线的个人执行机器。";
 function knownExecutor(id) {
   if (id === "claude") return "claude-code";
   return EXECUTORS.some((item) => item.id === id) ? id : "codebuddy";
@@ -72,8 +75,10 @@ function rememberModel(executor, id) {
   }
 }
 const codeBuddyModels = (models) => (models || []).filter((m) => !m.engine || m.engine === "codebuddy");
-const executorModelList = (models, executor) =>
-  executor === "codebuddy" ? codeBuddyModels(models) : engineModels(models, executor);
+const executorModelList = (models, executor) => {
+  if (executor === "ducc") return duccChatModels;
+  return executor === "codebuddy" ? codeBuddyModels(models) : engineModels(models, executor);
+};
 // The model a new conversation on executor starts with: the remembered one
 // while list still offers it, else the first listed. Before a CLI's list has
 // loaded the remembered model (or that CLI's own default) holds the place.
@@ -565,10 +570,13 @@ export function useChat() {
   const personalMachine = executionMachines.machines.find(
     (machine) => machine.id === personalMachineId && machine.ownerUserId === user?.id,
   );
+  const duccAvailable = personalMachine?.status === "online" &&
+    personalMachine.runtimes?.some((item) => item.provider === "ducc" &&
+      item.status === "online" && item.capabilities?.includes("team_chat"));
   const codeBuddy = executor === "codebuddy";
-  const listedForEngine = engineModels(models, executor);
+  const listedForEngine = executorModelList(models, executor);
   const executorModels = listedForEngine.length || codeBuddy
-    ? (codeBuddy ? models.filter((m) => !m.engine || m.engine === "codebuddy") : listedForEngine)
+    ? listedForEngine
     : providerCatalogs[executor]?.models || [];
   const missingKey = !!user && !user.codeBuddyApiKeyConfigured;
   // Without their own key users chat on the platform's shared key, limited to
@@ -576,7 +584,7 @@ export function useChat() {
   const sponsoredModel = sponsoredModels[0] || "";
   const sponsored = codeBuddy && missingKey && !user.isGuest && !!sponsoredModel;
   const sharedModelFor = (id) => (sponsoredModels.includes(id) ? id : sponsoredModel);
-  const activeModel = sponsored ? sharedModelFor(model) : model;
+  const activeModel = executor === "ducc" ? duccChatModels[0].id : sponsored ? sharedModelFor(model) : model;
   const activeEffort = modelEffort(executorModels.find((m) => m.id === activeModel), effort);
   useEffect(() => {
     if (codeBuddy || listedForEngine.length || providerCatalogs[executor]) return;
@@ -602,6 +610,7 @@ export function useChat() {
     (id) => {
       if (id === "claude") id = "claude-code";
       if (!EXECUTORS.some((item) => item.id === id) || id === executor) return;
+      if (id === "ducc" && !duccAvailable) return;
       const locked = conversationEngine(sessionRef.current?.messages, models, sessionRef.current?.executor);
       try {
         localStorage.setItem(EXECUTOR_KEY, id);
@@ -612,8 +621,14 @@ export function useChat() {
       setModel(preferredModel(listed.length || id === "codebuddy" ? listed : providerCatalogs[id]?.models, id));
       if (locked && locked !== id) open(null);
     },
-    [executor, models, open, providerCatalogs],
+    [executor, models, open, providerCatalogs, duccAvailable],
   );
+  useEffect(() => {
+    if (executor === "ducc" && executionMachines.machinesReady &&
+        !executionMachines.machineError && !duccAvailable && !executionLocked(session)) {
+      chooseExecutor("codebuddy");
+    }
+  }, [chooseExecutor, duccAvailable, executionMachines.machineError, executionMachines.machinesReady, executor, session]);
   const chooseModel = useCallback(
     (id) => {
       if (sponsored && !sponsoredModels.includes(id)) {
@@ -810,6 +825,10 @@ export function useChat() {
     if (executionMachines.machineSavingRef.current) { setError("执行机器仍在保存，请稍后发送。"); return false; }
     if (!executionLocked(sessionRef.current) && !executionMachines.machinesReady) {
       setError(executionMachines.machineError || "执行机器仍在加载，请稍后发送。");
+      return false;
+    }
+    if (executor === "ducc" && !duccAvailable) {
+      setError(duccMachineMessage);
       return false;
     }
     // Without a key (and no sponsored model) the server rejects every message.
@@ -1303,7 +1322,8 @@ export function useChat() {
     selectSandbox,
     models: executorModels,
     executor,
-    executors: EXECUTORS.map((item) => {
+    executors: EXECUTORS.filter((item) => item.id !== "ducc" || duccAvailable ||
+      conversationEngine(session?.messages, models, session?.executor) === "ducc").map((item) => {
       if (!personalMachine || (item.id !== "codex" && item.id !== "claude-code")) return item;
       const runtime = personalMachine.runtimes?.find((runtime) => runtime.provider === item.id);
       return runtime?.authMode === "personal" ? item : { ...item, detail: "使用执行机器上的本机登录态。" };

@@ -313,7 +313,26 @@ const (
 	RuntimeAuthPersonal            = "personal"
 	RuntimeCapabilityManagedUpdate = "managed_update"
 	RuntimeCapabilityNativeUpdate  = "native_update"
+	RuntimeCapabilityTeamChat      = "team_chat"
 )
+
+// SupportsDUCCChat requires the conversation protocol even on runners that
+// already support DUCC for SOP tasks.
+func (r Runner) SupportsDUCCChat() bool {
+	if r.Status != RunnerStatusOnline || !r.SupportsConversationCLI() {
+		return false
+	}
+	for _, rt := range r.Runtimes {
+		if rt.Provider == DUCCProvider && rt.Status == RuntimeStatusOnline {
+			for _, capability := range rt.Capabilities {
+				if capability == RuntimeCapabilityTeamChat {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
 
 func (rt RunnerRuntime) SupportsCLIUpdate() bool {
 	for _, capability := range rt.Capabilities {

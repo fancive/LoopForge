@@ -66,7 +66,37 @@ func (d *Daemon) detectDUCC(ctx context.Context) (domain.RunnerRuntime, bool) {
 		return domain.RunnerRuntime{}, false
 	}
 	return domain.RunnerRuntime{Provider: domain.DUCCProvider, BinaryPath: binary, Version: version,
-		Capabilities: []string{"non_interactive"}, Status: domain.RuntimeStatusOnline}, true
+		Capabilities: []string{"non_interactive", domain.RuntimeCapabilityTeamChat}, Status: domain.RuntimeStatusOnline}, true
+}
+
+// bindDUCCConversation gives the existing native chat process the Runner's
+// operator-owned settings. The control plane never receives the OneAPI key.
+func (d *Daemon) bindDUCCConversation(command *runtime.ConversationCommand) error {
+	binary, err := d.duccBinary()
+	if err != nil {
+		return err
+	}
+	if _, err := readDUCCSettings(d.cfg.DUCCSettings); err != nil {
+		return err
+	}
+	if len(command.Argv) == 0 {
+		return errors.New("invalid DUCC conversation command")
+	}
+	for i := 1; i < len(command.Argv)-1 && command.Argv[i] != "--"; i++ {
+		if command.Argv[i] == "--settings" {
+			command.Argv[0] = binary
+			command.Argv[i+1] = d.cfg.DUCCSettings
+			if command.Environment == nil {
+				command.Environment = make(map[string]string)
+			}
+			for _, key := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"} {
+				command.Environment[key] = ""
+			}
+			command.Environment["DISABLE_BAIDU_CLAUDE_UPDATE"] = "1"
+			return nil
+		}
+	}
+	return errors.New("missing DUCC conversation settings argument")
 }
 
 // bindDUCC keeps OneAPI settings and CLI session state on the dedicated Runner.

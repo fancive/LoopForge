@@ -73,6 +73,10 @@ func (h *assistantHandlers) startGeneration(c *gin.Context) {
 		}
 	}
 	cliEngine, _ := assistantModelEngine(req.Model)
+	if cliEngine == domain.DUCCProvider && (old.Mode() == domain.AssistantModeWorkspace || req.RunID != "") {
+		c.JSON(400, gin.H{"error": "DUCC + OneAPI 当前仅支持普通对话"})
+		return
+	}
 	runnerLogin := h.assistantUsesRunnerLogin(stored.ID, req.ExecutionTarget, cliEngine)
 	user, model, refusal := h.assistantTurnUser(stored, req.Model, runnerLogin)
 	if refusal != "" {
@@ -463,12 +467,7 @@ func (h *assistantHandlers) steerGeneration(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "请先配置个人 CodeBuddy API Key"})
 		return
 	}
-	user, sharedModels, ok := h.assistantChatUser(stored)
-	if !ok {
-		c.JSON(400, gin.H{"error": "请先配置个人 CodeBuddy API Key"})
-		return
-	}
-	ownerID, _, err := h.conversationScope(c, c.Param("id"), "", "", user.ID)
+	ownerID, _, err := h.conversationScope(c, c.Param("id"), "", "", stored.ID)
 	if err != nil {
 		c.JSON(403, gin.H{"error": err.Error()})
 		return
@@ -500,21 +499,37 @@ func (h *assistantHandlers) steerGeneration(c *gin.Context) {
 		return
 	}
 	model := body.Model
-	if sharedModels != nil {
-		forced, allowed := assistantSponsoredModelFor(sharedModels, model)
-		if !allowed {
-			c.JSON(400, gin.H{"error": errAssistantSponsoredModel(sharedModels)})
+	user := stored
+	if engine, _ := assistantModelEngine(session.Model); engine == domain.DUCCProvider {
+		target := session.Execution()
+		var refusal string
+		user, model, refusal = h.assistantTurnUser(stored, session.Model, h.assistantUsesRunnerLogin(stored.ID, &target, engine))
+		if refusal != "" {
+			c.JSON(400, gin.H{"error": refusal})
 			return
 		}
-		model = forced
+	} else {
+		var sharedModels []string
+		user, sharedModels, ok = h.assistantChatUser(stored)
+		if !ok {
+			c.JSON(400, gin.H{"error": "请先配置个人 CodeBuddy API Key"})
+			return
+		}
+		if sharedModels != nil {
+			forced, allowed := assistantSponsoredModelFor(sharedModels, model)
+			if !allowed {
+				c.JSON(400, gin.H{"error": errAssistantSponsoredModel(sharedModels)})
+				return
+			}
+			model = forced
+		}
+		// Refresh unlisted CodeBuddy models before considering the default.
+		catalog := h.chatCatalog(c.Request.Context(), user)
+		if engine, _ := assistantModelEngine(model); engine == assistantEngineCodeBuddy {
+			catalog = h.turnCatalog(c.Request.Context(), user, model)
+		}
+		model = assistantAllowedModel(model, catalog)
 	}
-	// A CodeBuddy model this instance has not listed yet refreshes the list
-	// first, like a new turn, instead of silently becoming the default.
-	catalog := h.chatCatalog(c.Request.Context(), user)
-	if engine, _ := assistantModelEngine(model); engine == assistantEngineCodeBuddy {
-		catalog = h.turnCatalog(c.Request.Context(), user, model)
-	}
-	model = assistantAllowedModel(model, catalog)
 	if err := validateAssistantEffort(user, model, body.Effort); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return

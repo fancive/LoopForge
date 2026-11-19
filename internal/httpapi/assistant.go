@@ -168,6 +168,10 @@ func (h *assistantHandlers) chat(c *gin.Context) {
 		req.ExecutionTarget = target
 	}
 	cliEngine, _ := assistantModelEngine(req.Model)
+	if cliEngine == domain.DUCCProvider && (old.Mode() == domain.AssistantModeWorkspace || req.RunID != "") {
+		c.JSON(400, gin.H{"error": "DUCC + OneAPI 当前仅支持普通对话"})
+		return
+	}
 	runnerLogin := h.assistantUsesRunnerLogin(stored.ID, req.ExecutionTarget, cliEngine)
 	user, model, refusal := h.assistantTurnUser(stored, req.Model, runnerLogin)
 	if refusal != "" {
@@ -1427,7 +1431,10 @@ func runAssistantCLI(ctx context.Context, req assistantCLIRequest, user domain.U
 			req.RunnerLogin = runnerLogin
 		}
 	}
-	if engineModel == "default" && (engine == assistantEngineCodex || engine == assistantEngineClaude) {
+	if engine == domain.DUCCProvider && (!req.RunnerLogin || !req.RemoteBinary || req.Execute == nil || req.Workspace) {
+		return "", "", errors.New("DUCC + OneAPI 需要已配置团队身份的个人执行机器和普通对话")
+	}
+	if engineModel == "default" && (engine == assistantEngineCodex || engine == assistantEngineClaude || engine == domain.DUCCProvider) {
 		engineModel = ""
 	}
 	attempt := assistantDiagnosticsFrom(ctx).begin(engine, engineModel, req.Resume, user)
@@ -1487,7 +1494,8 @@ func runAssistantCLI(ctx context.Context, req assistantCLIRequest, user domain.U
 	var inv assistantCLIInvocation
 	engineOpts := assistantEngineInvocationOpts{Bin: bin, Root: root, Config: config, Prompt: req.Prompt, Model: engineModel, Effort: req.Effort, SessionID: sessionID, Resume: req.Resume, SystemPrompt: req.SystemPrompt, ReviewOnly: req.ReviewOnly, Workspace: req.Workspace}
 	switch engine {
-	case assistantEngineClaude:
+	case assistantEngineClaude, domain.DUCCProvider:
+		engineOpts.TeamDUCC = engine == domain.DUCCProvider
 		if !req.RunnerLogin {
 			engineOpts.User = runtime.ProviderCredential{APIKey: user.ClaudeCodeAPIKey, BaseURL: user.ClaudeCodeBaseURL}
 		}

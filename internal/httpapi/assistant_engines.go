@@ -41,6 +41,9 @@ func assistantCLIEngines() []string {
 
 func assistantModelEngine(id string) (engine, model string) {
 	id = strings.TrimSpace(id)
+	if rest, ok := strings.CutPrefix(id, domain.DUCCProvider+":"); ok {
+		return domain.DUCCProvider, strings.TrimSpace(rest)
+	}
 	for _, engine := range assistantCLIEngines() {
 		if rest, ok := strings.CutPrefix(id, engine+":"); ok {
 			return engine, strings.TrimSpace(rest)
@@ -91,6 +94,8 @@ func assistantEngineOptions(user domain.User, sponsored bool) []assistantEngineO
 
 func assistantEngineLabel(engine string) string {
 	switch engine {
+	case domain.DUCCProvider:
+		return "DUCC + OneAPI"
 	case assistantEngineCodex:
 		return "Codex"
 	case assistantEngineClaude:
@@ -200,6 +205,9 @@ func assistantConversationEngine(messages []assistantMessage, legacyExecutor ...
 
 func assistantModelHasEnginePrefix(id string) bool {
 	id = strings.TrimSpace(id)
+	if strings.HasPrefix(id, domain.DUCCProvider+":") {
+		return true
+	}
 	for _, engine := range append([]string{assistantEngineCodeBuddy}, assistantCLIEngines()...) {
 		if _, ok := strings.CutPrefix(id, engine+":"); ok {
 			return true
@@ -217,6 +225,8 @@ func assistantLegacyExecutor(candidates ...string) string {
 			return assistantEngineCodex
 		case "claude", assistantEngineClaude:
 			return assistantEngineClaude
+		case domain.DUCCProvider:
+			return domain.DUCCProvider
 		case "", assistantEngineCodeBuddy:
 			continue
 		default:
@@ -249,6 +259,15 @@ func assistantEngineMissingKey(engine string) string {
 // Non-CodeBuddy turns can still borrow a CodeBuddy key for approval reviews.
 func (h *assistantHandlers) assistantTurnUser(stored domain.User, model string, runnerLogin bool) (domain.User, string, string) {
 	engine, id := assistantModelEngine(model)
+	if engine == domain.DUCCProvider {
+		if !runnerLogin {
+			return stored, "", "请选择已启用 DUCC + OneAPI 且在线的个人执行机器"
+		}
+		if id != "" && id != "default" {
+			return stored, "", "DUCC + OneAPI 使用团队默认模型"
+		}
+		return stored, domain.DUCCProvider + ":default", ""
+	}
 	if engine != assistantEngineCodeBuddy {
 		if runnerLogin {
 			if id == "" {
@@ -625,6 +644,8 @@ func assistantRequestModel(executor, model string) string {
 		return assistantEngineCodex + ":" + model
 	case "claude", assistantEngineClaude:
 		return assistantEngineClaude + ":" + model
+	case domain.DUCCProvider:
+		return domain.DUCCProvider + ":" + model
 	default:
 		if runtime.IsAgentCLI(executor) {
 			return strings.TrimSpace(executor) + ":" + model

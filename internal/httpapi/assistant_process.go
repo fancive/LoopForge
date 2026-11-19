@@ -224,7 +224,7 @@ func (h *assistantHandlers) conversationExecutor(s *AgentToolSession, root strin
 			command, credentials = h.bindWorkspaceGit(ctx, s, command, credentials)
 		}
 		wire := runtime.ConversationCommandFor(command, credentials)
-		wire.RunnerLogin = s.runnerLogin
+		wire.RunnerLogin = s.runnerLogin && command.Provider != domain.DUCCProvider
 		if s.ExecutionRunnerID != "" {
 			wire.Argv[0] = assistantEngineBinary(command.Provider)
 		}
@@ -344,6 +344,8 @@ func assistantEngineBinary(kind string) string {
 		return "codex"
 	case assistantEngineClaude:
 		return "claude"
+	case domain.DUCCProvider:
+		return domain.DUCCProvider
 	default:
 		return runtime.AgentCLIBinary(kind)
 	}

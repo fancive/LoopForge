@@ -74,12 +74,44 @@ describe("conversation hooks", () => {
     history.replaceState({}, "", "/");
   });
 
+  test("offers DUCC only on a selected machine that supports team chat and sends its default model", async () => {
+    localStorage.removeItem("loopforge.assistant.executor");
+    const original = apiMock.getMockImplementation();
+    const runtime = { provider: "ducc", status: "online" };
+    const machines = [
+      { id: "old-runner", ownerUserId: 1, status: "online", runtimes: [{ ...runtime, capabilities: ["non_interactive"] }] },
+      { id: "team-runner", ownerUserId: 1, status: "online", runtimes: [{ ...runtime, capabilities: ["team_chat"] }] },
+    ];
+    apiMock.mockImplementation(async (path, options) => {
+      if (path === "/api/runners?mine=1") return machines;
+      if (path === "/api/runners/default") return { runnerId: "old-runner" };
+      return original(path, options);
+    });
+    try {
+      const { result } = renderHook(() => useChat());
+      await waitFor(() => expect(result.current.machinesReady).toBe(true));
+      expect(result.current.executors.some((item) => item.id === "ducc")).toBe(false);
+      await act(() => result.current.selectMachine("team-runner"));
+      expect(result.current.executors.some((item) => item.id === "ducc")).toBe(true);
+      act(() => result.current.setExecutor("ducc"));
+      expect(result.current.model).toBe("ducc:default");
+      await act(() => result.current.send({ text: "team chat test" }));
+      expect(writeMock).toHaveBeenCalledWith("/api/assistant/generations", expect.objectContaining({
+        executor: "ducc", model: "ducc:default",
+        executionTarget: { pool: "runner", runnerId: "team-runner" },
+      }));
+    } finally {
+      apiMock.mockImplementation(original);
+      localStorage.removeItem("loopforge.assistant.executor");
+    }
+  });
+
   test("switches Main Bot to another CLI and sends its executor", async () => {
     localStorage.removeItem("loopforge.assistant.executor");
     const { result } = renderHook(() => useChat());
     await waitFor(() => expect(result.current.ready).toBe(true));
     expect(result.current.executor).toBe("codebuddy");
-    expect(result.current.executors.map((item) => item.id)).toEqual(EXECUTORS.map((item) => item.id));
+    expect(result.current.executors.map((item) => item.id)).toEqual(EXECUTORS.filter((item) => item.id !== "ducc").map((item) => item.id));
     act(() => result.current.setExecutor("codex"));
     await waitFor(() => expect(result.current.models.map((m) => m.id)).toEqual(["default", "gpt-5"]));
     expect(localStorage.getItem("loopforge.assistant.executor")).toBe("codex");

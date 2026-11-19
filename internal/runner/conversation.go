@@ -21,6 +21,10 @@ func (d *Daemon) conversationProcess(ctx context.Context, request domain.RunnerW
 	if err := json.Unmarshal(request.Conversation, &req); err != nil || !conversationKeyPattern.MatchString(req.SessionKey) {
 		return domain.RunnerWorkspaceResponse{Status: 400, Error: "invalid conversation process request"}
 	}
+	ducc := req.Command != nil && req.Command.Provider == domain.DUCCProvider
+	if ducc && (request.RunID != "" || request.Sandbox != nil) {
+		return domain.RunnerWorkspaceResponse{Status: 400, Error: "DUCC + OneAPI 当前仅支持普通对话"}
+	}
 	root := filepath.Join(d.cfg.DefaultWorkspaceRoot, ".conversations", req.SessionKey)
 	if req.Transient {
 		if request.RunID != "" {
@@ -46,7 +50,11 @@ func (d *Daemon) conversationProcess(ctx context.Context, request domain.RunnerW
 		return runnerWorkspaceError(fmt.Errorf("conversation control channel unavailable"))
 	}
 	var factory runtime.ConversationSandboxFactory
-	if request.RunID == "" {
+	if ducc {
+		factory = func(_ context.Context, _ string) (runtime.Sandbox, func(), error) {
+			return nil, nil, d.bindDUCCConversation(req.Command)
+		}
+	} else if request.RunID == "" {
 		factory = func(envCtx context.Context, _ string) (runtime.Sandbox, func(), error) {
 			var lease *managedcli.ClaimLease
 			var err error
